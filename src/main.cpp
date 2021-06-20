@@ -172,12 +172,12 @@ void connectmqtt() {
   client.connect(hostName, IO_USERNAME,
                  IO_KEY);  // ESP will connect to mqtt broker with clientID
   {
-    Serial.println("Connected to MQTT");
+    Serial.println("Watervalve Connected to MQTT");
     // Once connected, publish an announcement...
 
     // ... and resubscribe
     // client.subscribe("inTopic"); //topic=Demo
-    client.publish(topicLog, "Connected to MQTT");
+    client.publish(topicLog, "Watervalve Connected to MQTT");
 
     if (!client.connected()) {
       reconnect();
