@@ -31,7 +31,11 @@ char topicValve[BUFFERSIZE];
 
 char topicLog[BUFFERSIZE];
 
-uint8_t buttonState = 0u;
+constexpr uint16_t debounceDelay = 50u;
+uint8_t lastSteadyState = HIGH;
+uint8_t lastFlickerableState = HIGH;
+uint8_t currentState;
+unsigned long lastDebounceTime = 0;
 
 void connectmqtt();
 void reconnect();
@@ -47,7 +51,7 @@ void prepareStrings() {
 
 void setup() {
   prepareStrings();
-  delay(5000);     // wait 10s before we start anything
+  delay(500);     // wait 500ms before we start anything
   Serial.begin(115200);
   Serial.println("Booting");
   cleanBuffer();
@@ -85,11 +89,32 @@ static void cleanBuffer() { std::fill(buffer, buffer + BUFFERSIZE, 0); }
 
 void loop() {
   AsyncElegantOTA.loop();
-  buttonState = digitalRead(PIN_BUTTON);
-  if(buttonState == 1) {
-    digitalWrite(PIN_BUTTON, 1);
-    delay(200);
+  currentState = digitalRead(PIN_BUTTON);
+
+  // Debounce
+  if (currentState != lastFlickerableState) {
+    // reset the debouncing timer
+    lastDebounceTime = millis();
+    // save the the last flickerable state
+    lastFlickerableState = currentState;
   }
+
+  if ((millis() - lastDebounceTime) > debounceDelay) {
+    // whatever the reading is at, it's been there for longer than the debounce
+    // delay, so take it as the actual current state:
+
+    // if the button state has changed:
+    if(lastSteadyState == HIGH && currentState == LOW) {
+      // Serial.println("The button is pressed");
+      digitalWrite(PIN_RELAY, !digitalRead(PIN_RELAY));
+    }
+
+    else if(lastSteadyState == LOW && currentState == HIGH)
+    // Serial.println("The button is released");
+    // save the the last steady state
+    lastSteadyState = currentState;
+  }
+
   if (millis() - myTime > delayMS) {
     myTime = millis();
 
