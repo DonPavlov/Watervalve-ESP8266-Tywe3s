@@ -1,24 +1,26 @@
 #include <Arduino.h>
-#include <ArduinoOTA.h>
 #include <ESP8266WiFi.h>
-#include <ESP8266WiFiMulti.h>
 #include <ESP8266mDNS.h>
-#include <PubSubClient.h>
 #include <WiFiUdp.h>
-
+#include <PubSubClient.h>
 #include "config.h"
+
+#include <ESPAsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <AsyncElegantOTA.h>
 
 #define BUFFERSIZE (64)
 
-constexpr uint32_t delayMS = 10000;
+#define PIN_BUTTON   (12)
+#define PIN_RELAY (13)
 
-void setup();
+constexpr uint32_t delayMS = 10000;
 
 WiFiClient espClient;
 PubSubClient client(espClient);  // lib required for mqtt
+AsyncWebServer server(80);
 
 constexpr uint16_t mqttPort = 1883;
-constexpr uint16_t otaPort = 3232;
 
 const char* mqttServer = "io.adafruit.com";  // mqtt server
 const char* hostName = "watervalve";
@@ -28,6 +30,8 @@ char buffer[BUFFERSIZE];
 char topicValve[BUFFERSIZE];
 
 char topicLog[BUFFERSIZE];
+
+uint8_t buttonState = 0u;
 
 void connectmqtt();
 void reconnect();
@@ -43,9 +47,15 @@ void prepareStrings() {
 
 void setup() {
   prepareStrings();
+  delay(5000);     // wait 10s before we start anything
   Serial.begin(115200);
   Serial.println("Booting");
   cleanBuffer();
+
+  pinMode(PIN_BUTTON, INPUT_PULLUP);
+  pinMode(PIN_RELAY, OUTPUT);
+  digitalWrite(PIN_BUTTON, 0);
+
   WiFi.mode(WIFI_STA);
 
   WiFi.begin(ssid, password);
@@ -55,54 +65,13 @@ void setup() {
     ESP.restart();
   }
 
-  // Port defaults to 3232
-  ArduinoOTA.setPort(otaPort);
-
-  ArduinoOTA.setHostname(hostName);
-
-  // No authentication by default
-  // ArduinoOTA.setPassword("admin");
-
-  // Password can be set with it's md5 value as well
-  // MD5(admin) = 21232f297a57a5a743894a0e4a801fc3
-  // ArduinoOTA.setPasswordHash("21232f297a57a5a743894a0e4a801fc3");
-
-  ArduinoOTA.onStart([]() {
-    String type;
-    if (ArduinoOTA.getCommand() == U_FLASH) {
-      type = "sketch";
-    } else {
-      // U_FS
-      type = "filesystem";
-    }
-    // NOTE: if updating FS this would be the place to unmount FS using FS.end()
-
-    Serial.println("Start updating " + type);
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/plain", "Hi! I am ESP32.");
   });
 
-  ArduinoOTA.onEnd([]() { Serial.println("\nEnd"); });
-
-  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-  });
-
-  ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("Error[%u]: ", error);
-
-    if (error == OTA_AUTH_ERROR) {
-      Serial.println("Auth Failed");
-    } else if (error == OTA_BEGIN_ERROR) {
-      Serial.println("Begin Failed");
-    } else if (error == OTA_CONNECT_ERROR) {
-      Serial.println("Connect Failed");
-    } else if (error == OTA_RECEIVE_ERROR) {
-      Serial.println("Receive Failed");
-    } else if (error == OTA_END_ERROR) {
-      Serial.println("End Failed");
-    }
-  });
-
-  ArduinoOTA.begin();
+  AsyncElegantOTA.begin(&server);    // Start ElegantOTA
+  server.begin();
+  Serial.println("HTTP server started");
 
   Serial.println("Ready");
   Serial.print("IP address: ");
@@ -115,8 +84,12 @@ void setup() {
 static void cleanBuffer() { std::fill(buffer, buffer + BUFFERSIZE, 0); }
 
 void loop() {
-  ArduinoOTA.handle();
-
+  AsyncElegantOTA.loop();
+  buttonState = digitalRead(PIN_BUTTON);
+  if(buttonState == 1) {
+    digitalWrite(PIN_BUTTON, 1);
+    delay(200);
+  }
   if (millis() - myTime > delayMS) {
     myTime = millis();
 
@@ -127,6 +100,7 @@ void loop() {
     client.loop();
   }
 }
+
 
 void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message arrived [");
