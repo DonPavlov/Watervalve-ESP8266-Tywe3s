@@ -1,17 +1,17 @@
 #include <Arduino.h>
+#include <AsyncElegantOTA.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
-#include <WiFiUdp.h>
-#include <PubSubClient.h>
-#include "config.h"
-
 #include <ESPAsyncTCP.h>
 #include <ESPAsyncWebServer.h>
-#include <AsyncElegantOTA.h>
+#include <PubSubClient.h>
+#include <WiFiUdp.h>
+
+#include "config.h"
 
 #define BUFFERSIZE (64)
 
-#define PIN_BUTTON   (12)
+#define PIN_BUTTON (12)
 #define PIN_RELAY (13)
 
 constexpr uint32_t delayMS = 10000;
@@ -42,11 +42,10 @@ void reconnect();
 void callback(char* topic, byte* payload, unsigned int length);
 static void cleanBuffer();
 unsigned long myTime = 0;
-void prepareStrings();
 
 void prepareStrings() {
-  snprintf(topicValve, BUFFERSIZE, "%s%s", IO_USERNAME, "/f/watervalve");
-  snprintf(topicLog, BUFFERSIZE, "%s%s", IO_USERNAME, "/f/log");
+  snprintf(topicValve, BUFFERSIZE, "%s%s", IO_USERNAME, "/f/don-pavlov.watervalve");
+  snprintf(topicLog, BUFFERSIZE, "%s%s", IO_USERNAME, "/f/don-pavlov.log");
 }
 
 void setup() {
@@ -58,7 +57,10 @@ void setup() {
 
   pinMode(PIN_BUTTON, INPUT_PULLUP);
   pinMode(PIN_RELAY, OUTPUT);
-  digitalWrite(PIN_BUTTON, 0);
+
+  digitalWrite(PIN_RELAY, 1);  // Reset Relay
+  delay(50);
+  digitalWrite(PIN_RELAY, 0);
 
   WiFi.mode(WIFI_STA);
 
@@ -69,17 +71,18 @@ void setup() {
     ESP.restart();
   }
 
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "text/plain", "Hi! I am ESP32.");
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
+    request->send(200, "text/plain", "Meh! go to /update");
   });
 
-  AsyncElegantOTA.begin(&server);    // Start ElegantOTA
+  AsyncElegantOTA.begin(&server);  // Start ElegantOTA
   server.begin();
   Serial.println("HTTP server started");
 
   Serial.println("Ready");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
+  Serial.println(topicValve);
 
   client.setServer(mqttServer, mqttPort);
   client.setCallback(callback);
@@ -104,15 +107,15 @@ void loop() {
     // delay, so take it as the actual current state:
 
     // if the button state has changed:
-    if(lastSteadyState == HIGH && currentState == LOW) {
+    if (lastSteadyState == HIGH && currentState == LOW) {
       // Serial.println("The button is pressed");
       digitalWrite(PIN_RELAY, !digitalRead(PIN_RELAY));
     }
 
-    else if(lastSteadyState == LOW && currentState == HIGH)
-    // Serial.println("The button is released");
-    // save the the last steady state
-    lastSteadyState = currentState;
+    else if (lastSteadyState == LOW && currentState == HIGH)
+      // Serial.println("The button is released");
+      // save the the last steady state
+      lastSteadyState = currentState;
   }
 
   if (millis() - myTime > delayMS) {
@@ -126,7 +129,6 @@ void loop() {
   }
 }
 
-
 void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message arrived [");
   Serial.print(topic);
@@ -136,13 +138,17 @@ void callback(char* topic, byte* payload, unsigned int length) {
   }
   if ((char)payload[0] == 'O' && (char)payload[1] == 'N')  // on
   {
-    // digitalWrite(LED, HIGH);
-    Serial.println("on");
+    Serial.print("\r\n");
+    //Todo(donpavlov) add more payload with timing and convert the data to uints
+    digitalWrite(PIN_RELAY, 1);
+
   } else if ((char)payload[0] == 'O' && (char)payload[1] == 'F' &&
              (char)payload[2] == 'F')  // off
   {
     // digitalWrite(LED, LOW);
-    Serial.println(" off");
+    Serial.print("\r\n");
+    digitalWrite(PIN_RELAY, 0);
+
   }
   Serial.println();
 }
@@ -153,9 +159,9 @@ void reconnect() {
     if (client.connect(hostName, IO_USERNAME, IO_KEY)) {
       Serial.println("connected");
       // Once connected, publish an announcement...
-      client.publish(topicLog, "Nodemcu connected to MQTT");
+      client.publish(topicLog, "Watervalve connected to MQTT");
       // ... and resubscribe
-      // client.subscribe("inTopic");
+      client.subscribe(topicValve);
 
     } else {
       Serial.print("failed, rc=");
@@ -175,8 +181,8 @@ void connectmqtt() {
     // Once connected, publish an announcement...
 
     // ... and resubscribe
-    // client.subscribe("inTopic"); //topic=Demo
-    client.publish(topicLog, "Watervalve Connected to MQTT");
+    client.subscribe(topicValve);
+    client.publish(topicLog, "subscribed to watervalve");
 
     if (!client.connected()) {
       reconnect();
