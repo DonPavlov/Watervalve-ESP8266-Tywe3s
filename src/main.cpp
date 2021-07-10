@@ -6,14 +6,18 @@
 #include <ESPAsyncWebServer.h>
 #include <PubSubClient.h>
 #include <WiFiUdp.h>
-
+#include <DHT.h>
+#include <DHT_U.h>
 #include "config.h"
 
 #define BUFFERSIZE (64)
 
 #define PIN_BUTTON (12)
 #define PIN_RELAY (13)
+#define DHTPIN (14)
+#define DHTTYPE DHT22
 
+DHT_Unified dht(DHTPIN, DHTTYPE);
 constexpr uint32_t delayMS = 10000;
 
 WiFiClient espClient;
@@ -28,8 +32,12 @@ const char* hostName = "watervalve";
 char buffer[BUFFERSIZE];
 
 char topicValve[BUFFERSIZE];
+char topicHumidity[BUFFERSIZE];
+char topicTemp[BUFFERSIZE];
 
 char topicLog[BUFFERSIZE];
+char bufferHumidity[BUFFERSIZE];
+char bufferTemp[BUFFERSIZE];
 
 constexpr uint16_t debounceDelay = 50u;
 uint8_t lastSteadyState = HIGH;
@@ -44,16 +52,23 @@ static void cleanBuffer();
 unsigned long myTime = 0;
 
 void prepareStrings() {
-  snprintf(topicValve, BUFFERSIZE, "%s%s", IO_USERNAME, "/f/don-pavlov.watervalve");
+  snprintf(topicValve, BUFFERSIZE, "%s%s", IO_USERNAME,
+           "/f/don-pavlov.watervalve");
   snprintf(topicLog, BUFFERSIZE, "%s%s", IO_USERNAME, "/f/don-pavlov.log");
+  snprintf(topicHumidity, BUFFERSIZE, "%s%s", IO_USERNAME,
+           "/f/don-pavlov.humidity");
+  snprintf(topicTemp, BUFFERSIZE, "%s%s", IO_USERNAME,
+           "/f/don-pavlov.temperature");
 }
 
 void setup() {
   prepareStrings();
-  delay(500);     // wait 500ms before we start anything
+  delay(500);  // wait 500ms before we start anything
   Serial.begin(115200);
   Serial.println("Booting");
   cleanBuffer();
+  std::fill(bufferTemp, bufferTemp + BUFFERSIZE, 0);
+  std::fill(bufferHumidity, bufferHumidity + BUFFERSIZE, 0);
 
   pinMode(PIN_BUTTON, INPUT_PULLUP);
   pinMode(PIN_RELAY, OUTPUT);
@@ -83,6 +98,49 @@ void setup() {
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
   Serial.println(topicValve);
+
+  dht.begin();
+  sensor_t sensor;
+
+  Serial.println(F("DHTxx Unified Sensor Example"));
+  Serial.println(F("------------------------------------"));
+  Serial.println(F("Temperature Sensor"));
+  Serial.print(F("Sensor Type: "));
+  Serial.println(sensor.name);
+  Serial.print(F("Driver Ver:  "));
+  Serial.println(sensor.version);
+  Serial.print(F("Unique ID:   "));
+  Serial.println(sensor.sensor_id);
+  Serial.print(F("Max Value:   "));
+  Serial.print(sensor.max_value);
+  Serial.println(F("°C"));
+  Serial.print(F("Min Value:   "));
+  Serial.print(sensor.min_value);
+  Serial.println(F("°C"));
+  Serial.print(F("Resolution:  "));
+  Serial.print(sensor.resolution);
+  Serial.println(F("°C"));
+  Serial.println(F("------------------------------------"));
+  // Print humidity sensor details.
+  dht.humidity().getSensor(&sensor);
+  Serial.println(F("Humidity Sensor"));
+  Serial.print(F("Sensor Type: "));
+  Serial.println(sensor.name);
+  Serial.print(F("Driver Ver:  "));
+  Serial.println(sensor.version);
+  Serial.print(F("Unique ID:   "));
+  Serial.println(sensor.sensor_id);
+  Serial.print(F("Max Value:   "));
+  Serial.print(sensor.max_value);
+  Serial.println(F("%"));
+  Serial.print(F("Min Value:   "));
+  Serial.print(sensor.min_value);
+  Serial.println(F("%"));
+  Serial.print(F("Resolution:  "));
+  Serial.print(sensor.resolution);
+  Serial.println(F("%"));
+  Serial.println(F("------------------------------------"));
+  // Set delay between sensor readings based on sensor details.
 
   client.setServer(mqttServer, mqttPort);
   client.setCallback(callback);
@@ -121,6 +179,39 @@ void loop() {
   if (millis() - myTime > delayMS) {
     myTime = millis();
 
+    // Get temperature event and print its value.
+    sensors_event_t event;
+    dht.temperature().getEvent(&event);
+    if (isnan(event.temperature)) {
+      Serial.println(F("Error reading temperature!"));
+    } else {
+      snprintf(bufferTemp, BUFFERSIZE, "Temperature: %.2f°C",
+               event.temperature);
+      Serial.println(bufferTemp);
+      std::fill(bufferTemp, bufferTemp + BUFFERSIZE, 0);
+      snprintf(bufferTemp, BUFFERSIZE, "%.2f", event.temperature);
+      if (client.connected()) {
+        client.publish(topicTemp, bufferTemp);
+      }
+      std::fill(bufferTemp, bufferTemp + BUFFERSIZE, 0);
+    }
+
+    // Get humidity event and print its value.
+    dht.humidity().getEvent(&event);
+    if (isnan(event.relative_humidity)) {
+      Serial.println(F("Error reading humidity!"));
+    } else {
+      snprintf(bufferHumidity, BUFFERSIZE, "Humidity: %.2f%%",
+               event.relative_humidity);
+      Serial.println(bufferHumidity);
+      std::fill(bufferHumidity, bufferHumidity + BUFFERSIZE, 0);
+      snprintf(bufferHumidity, BUFFERSIZE, "%.2f", event.relative_humidity);
+      if (client.connected()) {
+        client.publish(topicHumidity, bufferHumidity);
+      }
+      std::fill(bufferHumidity, bufferHumidity + BUFFERSIZE, 0);
+    }
+
     if (!client.connected()) {
       reconnect();
     }
@@ -139,7 +230,8 @@ void callback(char* topic, byte* payload, unsigned int length) {
   if ((char)payload[0] == 'O' && (char)payload[1] == 'N')  // on
   {
     Serial.print("\r\n");
-    //Todo(donpavlov) add more payload with timing and convert the data to uints
+    // Todo(donpavlov) add more payload with timing and convert the data to
+    // uints
     digitalWrite(PIN_RELAY, 1);
 
   } else if ((char)payload[0] == 'O' && (char)payload[1] == 'F' &&
@@ -148,7 +240,6 @@ void callback(char* topic, byte* payload, unsigned int length) {
     // digitalWrite(LED, LOW);
     Serial.print("\r\n");
     digitalWrite(PIN_RELAY, 0);
-
   }
   Serial.println();
 }
