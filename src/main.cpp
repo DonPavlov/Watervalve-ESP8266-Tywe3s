@@ -36,14 +36,20 @@ char topicHumidity[BUFFERSIZE];
 char topicTemp[BUFFERSIZE];
 
 char topicLog[BUFFERSIZE];
+
+char bufferValve[BUFFERSIZE];
 char bufferHumidity[BUFFERSIZE];
 char bufferTemp[BUFFERSIZE];
 
 constexpr uint16_t debounceDelay = 50u;
 uint8_t lastSteadyState = HIGH;
 uint8_t lastFlickerableState = HIGH;
-uint8_t currentState;
-unsigned long lastDebounceTime = 0;
+uint8_t currentState = 0u;
+uint8_t currentRelay = 0u;
+uint8_t oldRelay= 0u;
+bool publishRelay = false;
+
+unsigned long lastDebounceTime = 0u;
 
 void connectmqtt();
 void reconnect();
@@ -77,6 +83,8 @@ void setup() {
   delay(50);
   digitalWrite(PIN_RELAY, 0);
 
+  oldRelay = digitalRead(PIN_RELAY);
+  publishRelay = true;
   WiFi.mode(WIFI_STA);
 
   WiFi.begin(ssid, password);
@@ -149,8 +157,12 @@ void setup() {
 static void cleanBuffer() { std::fill(buffer, buffer + BUFFERSIZE, 0); }
 
 void loop() {
-  AsyncElegantOTA.loop();
   currentState = digitalRead(PIN_BUTTON);
+  currentRelay = digitalRead(PIN_RELAY);
+  if (currentRelay != oldRelay) {
+    oldRelay = currentRelay;
+    publishRelay = true;
+  }
 
   // Debounce
   if (currentState != lastFlickerableState) {
@@ -212,6 +224,22 @@ void loop() {
       std::fill(bufferHumidity, bufferHumidity + BUFFERSIZE, 0);
     }
 
+    if (publishRelay) {
+      snprintf(bufferValve, BUFFERSIZE, "RelayState: %d", currentRelay);
+      Serial.println(bufferValve);
+      std::fill(bufferHumidity, bufferHumidity + BUFFERSIZE, 0);
+      if (currentRelay == 0) {
+        snprintf(bufferValve, BUFFERSIZE, "OFF");
+      }
+      else {
+        snprintf(bufferValve, BUFFERSIZE, "ON");
+      }
+      if (client.connected()) {
+        client.publish(topicValve, bufferValve);
+      }
+      std::fill(bufferHumidity, bufferHumidity + BUFFERSIZE, 0);
+    }
+
     if (!client.connected()) {
       reconnect();
     }
@@ -224,7 +252,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message arrived [");
   Serial.print(topic);
   Serial.print("] ");
-  for (int i = 0; i < length; i++) {
+  for (uint32_t i = 0; i < length; i++) {
     Serial.print((char)payload[i]);
   }
   if ((char)payload[0] == 'O' && (char)payload[1] == 'N')  // on
@@ -232,11 +260,24 @@ void callback(char* topic, byte* payload, unsigned int length) {
     Serial.print("\r\n");
     // Todo(donpavlov) add more payload with timing and convert the data to
     // uints
+    if (digitalRead(PIN_RELAY) == 1) {
+      publishRelay = false;
+    }
+    else {
+      publishRelay = true;
+    }
     digitalWrite(PIN_RELAY, 1);
+
 
   } else if ((char)payload[0] == 'O' && (char)payload[1] == 'F' &&
              (char)payload[2] == 'F')  // off
   {
+    if (digitalRead(PIN_RELAY) == 0) {
+      publishRelay = false;
+    }
+    else {
+      publishRelay = true;
+    }
     // digitalWrite(LED, LOW);
     Serial.print("\r\n");
     digitalWrite(PIN_RELAY, 0);
