@@ -187,6 +187,22 @@ void loop() {
       // save the the last steady state
       lastSteadyState = currentState;
   }
+  // not working, due to timing issues with webpage
+  // if (publishRelay) {
+  //     snprintf(bufferValve, BUFFERSIZE, "RelayState: %d", currentRelay);
+  //     Serial.println(bufferValve);
+  //     std::fill(bufferHumidity, bufferHumidity + BUFFERSIZE, 0);
+  //     if (currentRelay == 0) {
+  //       snprintf(bufferValve, BUFFERSIZE, "OFF");
+  //     }
+  //     else {
+  //       snprintf(bufferValve, BUFFERSIZE, "ON");
+  //     }
+  //     if (client.connected()) {
+  //       client.publish(topicValve, bufferValve);
+  //     }
+  //     std::fill(bufferHumidity, bufferHumidity + BUFFERSIZE, 0);
+  // }
 
   if (millis() - myTime > delayMS) {
     myTime = millis();
@@ -224,21 +240,7 @@ void loop() {
       std::fill(bufferHumidity, bufferHumidity + BUFFERSIZE, 0);
     }
 
-    if (publishRelay) {
-      snprintf(bufferValve, BUFFERSIZE, "RelayState: %d", currentRelay);
-      Serial.println(bufferValve);
-      std::fill(bufferHumidity, bufferHumidity + BUFFERSIZE, 0);
-      if (currentRelay == 0) {
-        snprintf(bufferValve, BUFFERSIZE, "OFF");
-      }
-      else {
-        snprintf(bufferValve, BUFFERSIZE, "ON");
-      }
-      if (client.connected()) {
-        client.publish(topicValve, bufferValve);
-      }
-      std::fill(bufferHumidity, bufferHumidity + BUFFERSIZE, 0);
-    }
+
 
     if (!client.connected()) {
       reconnect();
